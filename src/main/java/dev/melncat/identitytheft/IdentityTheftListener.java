@@ -6,8 +6,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
+import org.bukkit.event.player.PlayerKickEvent;
 
 public class IdentityTheftListener implements Listener {
 	private final IdentityTheft plugin;
@@ -23,6 +23,14 @@ public class IdentityTheftListener implements Listener {
 			newProfile.complete(true);
 			newProfile.setProperty(new ProfileProperty("it_real", event.getUniqueId().toString()));
 			event.setPlayerProfile(newProfile);
+		}
+	}
+
+	@EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+	private void on(PlayerKickEvent event) {
+		if (event.getCause() == PlayerKickEvent.Cause.INVALID_PUBLIC_KEY_SIGNATURE
+				&& event.getPlayer().getPlayerProfile().hasProperty("it_real")) {
+			event.setCancelled(true);
 		}
 	}
 }

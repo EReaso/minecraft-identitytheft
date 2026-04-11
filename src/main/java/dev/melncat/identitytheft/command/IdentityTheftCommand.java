@@ -1,5 +1,6 @@
 package dev.melncat.identitytheft.command;
 
+import com.destroystokyo.paper.profile.PlayerProfile;
 import dev.melncat.identitytheft.IdentityManager;
 import dev.melncat.identitytheft.IdentityTheft;
 import dev.melncat.identitytheft.IdentityTheftConfig;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class IdentityTheftCommand implements CommandExecutor, TabCompleter {
@@ -58,20 +60,19 @@ public class IdentityTheftCommand implements CommandExecutor, TabCompleter {
 				sender.sendMessage(ChatColor.RED + "You cannot use this while your identity is changed.\n" + ChatColor.RED + "Reset it first with /it reset.");
 				return true;
 			}
-			UUID target = playerFromString(args[1]);
-			if (target == null) {
-				sender.sendMessage(ChatColor.RED + args[1] + " is not a valid player.");
-				return true;
-			}
-			if (plugin.getITConfig().opProtection()
-				&& !sender.isOp()
-				&& Bukkit.getOperators().stream().anyMatch(x -> x.getUniqueId().equals(target))
-			) {
-				sender.sendMessage(ChatColor.RED + "You cannot change your identity into an operator.");
-				return true;
-			}
-			IdentityManager.getInstance().setChangedIdentity(((Player) sender).getUniqueId(), target);
-			((Player) sender).kickPlayer("Please rejoin for changes to apply.");
+			Player player = (Player) sender;
+			String targetName = args[1];
+			resolveUUID(sender, targetName, target -> {
+				if (plugin.getITConfig().opProtection()
+					&& !sender.isOp()
+					&& Bukkit.getOperators().stream().anyMatch(x -> x.getUniqueId().equals(target))
+				) {
+					sender.sendMessage(ChatColor.RED + "You cannot change your identity into an operator.");
+					return;
+				}
+				IdentityManager.getInstance().setChangedIdentity(player.getUniqueId(), target);
+				player.kickPlayer("Please rejoin for changes to apply.");
+			});
 		} else if (args[0].equalsIgnoreCase("set")) {
 			if (!sender.hasPermission("identitytheft.command.identitytheft.set")) {
 				sendMissingPermission(sender, "identitytheft.command.identitytheft.set");
@@ -81,35 +82,32 @@ public class IdentityTheftCommand implements CommandExecutor, TabCompleter {
 				sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cInsufficient arguments provided.\n&cExample: /it set <from> <to>"));
 				return true;
 			}
-			UUID from = playerFromString(args[1]);
-			if (from == null) {
-				sender.sendMessage(ChatColor.RED + args[1] + " is not a valid player.");
-				return true;
-			}
-			UUID to = playerFromString(args[2]);
-			if (to == null) {
-				sender.sendMessage(ChatColor.RED + args[2] + " is not a valid player.");
-				return true;
-			}
-			if (plugin.getITConfig().opProtection()
-				&& !sender.isOp()
-				&& Bukkit.getOperators().stream().anyMatch(x -> x.getUniqueId().equals(from) || x.getUniqueId().equals(to))
-			) {
-				sender.sendMessage(ChatColor.RED + "You cannot change the identities of operators.");
-				return true;
-			}
-			IdentityManager.getInstance().setChangedIdentity(from, to);
-			sender.sendMessage(ChatColor.YELLOW
-				+ "The player "
-				+ ChatColor.WHITE
-				+ args[1]
-				+ ChatColor.YELLOW
-				+ " has successfully been changed to "
-				+ ChatColor.WHITE
-				+ args[2]
-				+ ChatColor.YELLOW
-				+ ".");
-			if (Bukkit.getPlayer(from) != null) Bukkit.getPlayer(from).kickPlayer("Disconnected");
+			String fromName = args[1];
+			String toName = args[2];
+			resolveUUID(sender, fromName, from -> {
+				resolveUUID(sender, toName, to -> {
+					if (plugin.getITConfig().opProtection()
+						&& !sender.isOp()
+						&& Bukkit.getOperators().stream().anyMatch(x -> x.getUniqueId().equals(from) || x.getUniqueId().equals(to))
+					) {
+						sender.sendMessage(ChatColor.RED + "You cannot change the identities of operators.");
+						return;
+					}
+					IdentityManager.getInstance().setChangedIdentity(from, to);
+					sender.sendMessage(ChatColor.YELLOW
+						+ "The player "
+						+ ChatColor.WHITE
+						+ fromName
+						+ ChatColor.YELLOW
+						+ " has successfully been changed to "
+						+ ChatColor.WHITE
+						+ toName
+						+ ChatColor.YELLOW
+						+ ".");
+					Player fromPlayer = Bukkit.getPlayer(from);
+					if (fromPlayer != null) fromPlayer.kickPlayer("Disconnected");
+				});
+			});
 		} else if (args[0].equalsIgnoreCase("reset")) {
 			if (!sender.hasPermission("identitytheft.command.identitytheft.reset")) {
 				sendMissingPermission(sender, "identitytheft.command.identitytheft.reset");
@@ -132,15 +130,13 @@ public class IdentityTheftCommand implements CommandExecutor, TabCompleter {
 				sendMissingPermission(sender, "identitytheft.command.identitytheft.reset.others");
 				return true;
 			}
-			UUID target = playerFromString(args[1]);
-			if (target == null) {
-				sender.sendMessage(ChatColor.RED + args[1] + " is not a valid player.");
-				return true;
-			}
-			if (IdentityManager.getInstance().hasChangedIdentity(target)) {
-				IdentityManager.getInstance().removeChangedIdentity(target);
-				sender.sendMessage(ChatColor.YELLOW + "The identity of " + args[1] + " has been reset.");
-			} else sender.sendMessage(ChatColor.RED + "The identity of " + args[1] + "is not altered.");
+			String targetName = args[1];
+			resolveUUID(sender, targetName, target -> {
+				if (IdentityManager.getInstance().hasChangedIdentity(target)) {
+					IdentityManager.getInstance().removeChangedIdentity(target);
+					sender.sendMessage(ChatColor.YELLOW + "The identity of " + targetName + " has been reset.");
+				} else sender.sendMessage(ChatColor.RED + "The identity of " + targetName + " is not altered.");
+			});
 		}
 		return true;
 	}
@@ -158,12 +154,38 @@ public class IdentityTheftCommand implements CommandExecutor, TabCompleter {
 			+ ChatColor.DARK_RED + permission);
 	}
 	
-	private UUID playerFromString(String str) {
+	/**
+	 * Resolves a player name or UUID string to a UUID.
+	 * Tries direct UUID parsing and local server lookup first; falls back to
+	 * an asynchronous Mojang profile lookup so that players who have never
+	 * joined this server (including freshly-created accounts) can be targeted.
+	 * The {@code onFound} callback is always invoked on the main thread.
+	 */
+	private void resolveUUID(CommandSender sender, String name, Consumer<UUID> onFound) {
 		try {
-			return UUID.fromString(str);
-		} catch (IllegalArgumentException e) {
-			return Bukkit.getPlayerUniqueId(str);
+			onFound.accept(UUID.fromString(name));
+			return;
+		} catch (IllegalArgumentException ignored) {}
+
+		UUID local = Bukkit.getPlayerUniqueId(name);
+		if (local != null) {
+			onFound.accept(local);
+			return;
 		}
+
+		sender.sendMessage(ChatColor.YELLOW + "Looking up player profile for " + name + "...");
+		Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+			PlayerProfile profile = Bukkit.createProfile(name);
+			boolean found = profile.complete(false);
+			UUID foundId = profile.getId();
+			Bukkit.getScheduler().runTask(plugin, () -> {
+				if (found && foundId != null) {
+					onFound.accept(foundId);
+				} else {
+					sender.sendMessage(ChatColor.RED + name + " is not a valid player.");
+				}
+			});
+		});
 	}
 	
 	@Override

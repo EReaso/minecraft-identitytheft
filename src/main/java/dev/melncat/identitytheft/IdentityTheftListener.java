@@ -8,6 +8,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerKickEvent;
+import org.bukkit.event.player.PlayerLoginEvent;
 
 public class IdentityTheftListener implements Listener {
 	private final IdentityTheft plugin;
@@ -23,6 +24,30 @@ public class IdentityTheftListener implements Listener {
 			newProfile.complete(true);
 			newProfile.setProperty(new ProfileProperty("it_real", event.getUniqueId().toString()));
 			event.setPlayerProfile(newProfile);
+		}
+	}
+
+	/**
+	 * If the target identity is banned, allow the login anyway since the
+	 * player is using identity theft and their real account is not banned.
+	 */
+	@EventHandler(priority = EventPriority.HIGHEST)
+	private void onPreLoginBanBypass(AsyncPlayerPreLoginEvent event) {
+		if (event.getLoginResult() == AsyncPlayerPreLoginEvent.Result.KICK_BANNED
+				&& event.getPlayerProfile().hasProperty("it_real")) {
+			event.allow();
+		}
+	}
+
+	/**
+	 * Second ban-bypass check at the synchronous login stage, in case
+	 * the server re-checks the ban based on the changed profile name.
+	 */
+	@EventHandler(priority = EventPriority.HIGHEST)
+	private void onLoginBanBypass(PlayerLoginEvent event) {
+		if (event.getResult() == PlayerLoginEvent.Result.KICK_BANNED
+				&& event.getPlayer().getPlayerProfile().hasProperty("it_real")) {
+			event.allow();
 		}
 	}
 
